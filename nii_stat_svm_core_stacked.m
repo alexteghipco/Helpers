@@ -1,4 +1,4 @@
-function [acc, acc1, acc2, acc3, z_map1, z_map2, z_map3, acc_per_class, acc_per_class1, acc_per_class2, acc_per_class3, p, p1, p2, p3] = nii_stat_svm_core_stacked(data1, data2, class_labels, maxNsplits, normRowCol, verbose, islinear)
+function [acc, acc1, acc2, acc3, z_map1, z_map2, z_map3, acc_per_class, acc_per_class1, acc_per_class2, acc_per_class3, p, p1, p2, p3,good_idx1,good_idx2,good_idx3, map, map1,map2,map3] = nii_stat_svm_core_stacked(data1, data2, class_labels, maxNsplits, normRowCol, verbose, islinear)
 % Build multiple different models to classify multimodal data using linear
 % support vector machines (one SVR model will be trained on data from modality
 % 1, one SVR model will be trained on data from modality 2, one SVR model
@@ -191,7 +191,7 @@ if optimize_C
             [~, ~, temp, ~] = evalc ('svmpredict (class_labels1, data1_1'', subSVM1_2)');
             acc1_2 = temp(1)/100;
             acc1(C_idx, g) = mean ([acc1_1 acc1_2]);
-
+            
             [out, subSVM2_1] = evalc (['svmtrain (class_labels1, data2_1'', ' str ');']);
             [out, subSVM2_2] = evalc (['svmtrain (class_labels2, data2_2'', ' str ');']);
             ww2_1 = subSVM2_1.sv_coef' * subSVM2_1.SVs;
@@ -203,7 +203,7 @@ if optimize_C
             [~, ~, temp, ~] = evalc ('svmpredict (class_labels1, data2_1'', subSVM2_2)');
             acc2_2 = temp(1)/100;
             acc2(C_idx, g) = mean ([acc2_1 acc2_2]);
-
+            
             [out, subSVM3_1] = evalc (['svmtrain (class_labels1, data3_1'', ' str ');']);
             [out, subSVM3_2] = evalc (['svmtrain (class_labels2, data3_2'', ' str ');']);
             ww3_1 = subSVM3_1.sv_coef' * subSVM3_1.SVs;
@@ -215,20 +215,20 @@ if optimize_C
             [~, ~, temp, ~] = evalc ('svmpredict (class_labels1, data3_1'', subSVM3_2)');
             acc3_2 = temp(1)/100;
             acc3(C_idx, g) = mean ([acc3_1 acc3_2]);
-        end  
+        end
     end
-
-    cost1 = ((1+acc1)/2).^2 + repr1.^2;    
+    
+    cost1 = ((1+acc1)/2).^2 + repr1.^2;
     [~, optC_idx] = max (mean (cost1, 2));
     C1 = C_list (optC_idx);
     fprintf ('Optimized value of C for data1: %g\n', C1);
-
-    cost2 = ((1+acc2)/2).^2 + repr2.^2;    
+    
+    cost2 = ((1+acc2)/2).^2 + repr2.^2;
     [~, optC_idx] = max (mean (cost2, 2));
     C2 = C_list (optC_idx);
     fprintf ('Optimized value of C for data2: %g\n', C2);
-
-    cost3 = ((1+acc3)/2).^2 + repr3.^2;    
+    
+    cost3 = ((1+acc3)/2).^2 + repr3.^2;
     [~, optC_idx] = max (mean (cost3, 2));
     C3 = C_list (optC_idx);
     fprintf ('Optimized value of C for pooled data: %g\n', C3);
@@ -269,10 +269,9 @@ for split = 1:n_splits
         curr_split = [train_idx1 train_idx0];
     end
     prev_splits (split, :) = curr_split;
-end
-for split = 1:n_splits
-    used(split,:) = setdiff([1:56],prev_splits (split, :));
-end
+% end
+% for split = 1:n_splits
+%     used(split,:) = setdiff([1:56],prev_splits (split, :));
 
     test_idx = [test_idx1 test_idx0];
     train_idx = [train_idx1 train_idx0];
@@ -308,8 +307,9 @@ end
     % now build a model to predict training data using multinomial logistic
     % regression
     mdl = fitclinear([svtprob1 svtprob2],train_labels,'Learner','logistic');
-    assignments = predict(mdl,[prob1 prob2]);
-
+    assignments = predict(mdl,[prob1 prob2]); 
+    %mdl.Bias + [prob1 prob2]*mdl.Beta % > 0 is 1, < 0 is 0
+    
     ntrials (test_idx) = ntrials (test_idx) + 1;
 
     map1 (split, :) = model1.sv_coef' * model1.SVs; %#ok<AGROW>
@@ -323,7 +323,8 @@ end
     map3 (split, :) = model3.sv_coef' * model3.SVs; %#ok<AGROW>
     correct_idx = test_idx (find (test_labels == assignments3'));
     correct3 (correct_idx) = correct3 (correct_idx) + 1;
-
+    
+    map (split, :) = [mdl.Beta; mdl.Bias]; %#ok<AGROW>
     correct_idx = test_idx (find (test_labels == assignments'));
     correct (correct_idx) = correct (correct_idx) + 1; 
 end %for each split  
@@ -331,10 +332,12 @@ end %for each split
 % mean_map = mean (map, 1);
 % z_map = mean_map ./ std (mean_map);
 % Z-scoring of maps: a version of delete-d jackknife
+
 d = abs (n0 - n1) + 2; 
 t_map1 = mean (map1, 1) ./ (std (map1, 1, 1) * sqrt(N/d-1));
 t_map2 = mean (map2, 1) ./ (std (map2, 1, 1) * sqrt(N/d-1));
 t_map3 = mean (map3, 1) ./ (std (map3, 1, 1) * sqrt(N/d-1));
+
 z_map1 = zeros (size (t_map1));
 z_map1 (:) = nan;
 z_map1 (~isnan (t_map1)) = spm_t2z (t_map1(~isnan (t_map1)), length(class_labels) - 1);
@@ -571,4 +574,3 @@ bad = isnan(classBin);
 data(bad,:) = [];
 classBin(bad)=[];
 %end binarySub
-
